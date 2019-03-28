@@ -16,7 +16,7 @@ render() {
 	return (
 		<SiteVerticalsSuggestionSearch
 			onChange={ this.onChange }
-			initialValue={ this.state.initialValue }
+			searchValue={ this.state.searchValue }
 			charsToTriggerSearch={ 3 }
 		/>
 	);
@@ -26,7 +26,7 @@ render() {
 
 ## Props
 
-### _(String)_ `initialValue`
+### _(String)_ `searchValue`
 An _optional_ initial value of the search input field. Default is `''`;
 
 ### _(String)_ `placeholder`

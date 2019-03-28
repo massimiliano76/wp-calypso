@@ -31,7 +31,6 @@ export class SiteVerticalsSuggestionSearch extends Component {
 		onChange: PropTypes.func,
 		placeholder: PropTypes.string,
 		shouldShowPopularTopics: PropTypes.func,
-		searchValue: PropTypes.string,
 		verticals: PropTypes.array,
 		defaultVertical: PropTypes.object,
 	};
@@ -42,7 +41,6 @@ export class SiteVerticalsSuggestionSearch extends Component {
 		onChange: noop,
 		placeholder: '',
 		shouldShowPopularTopics: noop,
-		searchValue: '',
 		verticals: [],
 		defaultVertical: {},
 	};
@@ -51,11 +49,11 @@ export class SiteVerticalsSuggestionSearch extends Component {
 		super( props );
 		this.state = {
 			railcar: this.getNewRailcar(),
-			searchValue: props.searchValue,
 			candidateVerticals: [],
 			isSuggestionSelected: false,
+			searchValue: props.searchValue,
 		};
-		this.updateVerticalDataDebounced = debounce( this.updateVerticalData, 1000 );
+		this.updateVerticalDataDebounced = props.bindDebounce( this.updateVerticalData );
 	}
 
 	componentDidUpdate( prevProps ) {
@@ -75,13 +73,16 @@ export class SiteVerticalsSuggestionSearch extends Component {
 	 * Sets `state.results` with incoming HTTP results, retaining previous non-user vertical search results
 	 * if the incoming HTTP results contain only user-defined results.
 	 *
+	 * Then we'll debounce the update on the vertical while the user is typing to reduce
+	 * the amount of times we update the site preview.
+	 *
 	 * This function could better be performed in the backend eventually.
 	 *
 	 * @param {Array} results Incoming HTTP results
 	 */
 	setSearchResults = results => {
 		if ( size( results ) ) {
-			const { candidateVerticals, searchValue } = this.state;
+			const { candidateVerticals, isSuggestionSelected } = this.state;
 			// if the only result is a user input (non-vertical),
 			// and we have some previous results
 			// then concat that with the previous results and remove the last user input
@@ -89,24 +90,17 @@ export class SiteVerticalsSuggestionSearch extends Component {
 				! find( results, item => ! item.isUserInputVertical ) &&
 				1 < size( candidateVerticals )
 			) {
-				results = candidateVerticals
-					.filter( item => ! item.isUserInputVertical ).concat( results );
+				results = candidateVerticals.filter( item => ! item.isUserInputVertical ).concat( results );
 			}
 
-			const matches = this.searchForVerticalMatches( searchValue );
+			const matches = this.searchForVerticalMatches( this.state.searchValue );
 
 			this.setState( { candidateVerticals: results }, () =>
 				// if a user has selected a vertical from the suggestion list,
 				// set a flag to load sans debounce
-				this.state.isSuggestionSelected ?
-					this.updateVerticalData(
-						matches,
-						searchValue
-					) :
-					this.updateVerticalDataDebounced(
-						matches,
-						searchValue
-					)
+				isSuggestionSelected
+					? this.updateVerticalData( matches, this.state.searchValue )
+					: this.updateVerticalDataDebounced( matches, this.state.searchValue )
 			);
 		}
 	};
@@ -139,6 +133,7 @@ export class SiteVerticalsSuggestionSearch extends Component {
 	 * @param {String} value Search query array
 	 */
 	updateVerticalData = ( verticalData, value = '' ) => {
+		value = value.trim();
 		this.props.onChange(
 			verticalData || {
 				isUserInputVertical: true,
@@ -155,55 +150,57 @@ export class SiteVerticalsSuggestionSearch extends Component {
 	 * Callback to be passed to consuming component when the search field is updated.
 	 *
 	 * @param {String} value The new search value
+	 * @param {Bool} isSuggestionSelected Whether the user has selected a suggestion
 	 */
-	onSiteTopicChange = value => {
-		// TODO:
-		// Where to put the railcar code will be reconsidered.
+	onSiteTopicChange = ( value, isSuggestionSelected ) => {
+		// TODO: Where to put the railcar code will be reconsidered.
 		if (
 			!! value &&
-			value !== this.state.searchValue &&
+			value !== this.props.searchValue &&
 			size( value ) >= this.props.charsToTriggerSearch
 		) {
 			this.setState( { railcar: this.getNewRailcar() } );
 		}
 
-		this.setState( {
-			searchValue: value,
-			isSuggestionSelected: false,
-		}, () => this.updateVerticalDataDebounced( this.searchForVerticalMatches( value ), value ) );
+		// let's update the value immediately
+		// when the user has either selected or cleared the value
+		// so we can load the preview more quickly
+		if ( isSuggestionSelected || ! value ) {
+			this.updateVerticalData( this.searchForVerticalMatches( value ), value );
+		}
+
+		this.setState(
+			{
+				isSuggestionSelected,
+				searchValue: value,
+			},
+			() => this.updateVerticalDataDebounced( this.searchForVerticalMatches( value ), value )
+		);
 	};
 
 	/***
-	 * Callback to be passed to consuming component a search suggestion is selected.
+	 * Returns an array of vertical values - suggestions - that is consumable by `<SuggestionSearch />`
 	 *
-	 * @param {String} value The new search value
+	 * @returns {Array} The array of vertical values.
 	 */
-	onSiteTopicSelect = value => {
-		this.setState( {
-			searchValue: value,
-			isSuggestionSelected: true,
-		}, () => this.updateVerticalData( this.searchForVerticalMatches( value ), value ) );
-	};
-
 	getSuggestions = () => this.state.candidateVerticals.map( vertical => vertical.verticalName );
 
 	render() {
-		const {
-			translate,
-			placeholder,
-			autoFocus,
-			isVerticalSearchPending,
-		} = this.props;
+		const { translate, placeholder, autoFocus, isVerticalSearchPending } = this.props;
 
 		return (
 			<>
-				<QueryVerticals searchTerm={ this.state.searchValue.trim() } debounceTime={ 300 } />
+				<QueryVerticals
+					searchTerm={ this.state.searchValue.trim() }
+					debounceTime={
+						! this.state.isSuggestionSelected || size( this.state.searchValue ) > 4 ? 300 : 0
+					}
+				/>
 				<QueryVerticals searchTerm={ DEFAULT_VERTICAL_KEY } limit={ 1 } />
 				<SuggestionSearch
 					id="siteTopic"
 					placeholder={ placeholder || translate( 'Enter a keyword or select one from below.' ) }
 					onChange={ this.onSiteTopicChange }
-					onSelect={ this.onSiteTopicSelect }
 					suggestions={ this.getSuggestions() }
 					value={ this.state.searchValue }
 					autoFocus={ autoFocus } // eslint-disable-line jsx-a11y/no-autofocus
@@ -211,7 +208,7 @@ export class SiteVerticalsSuggestionSearch extends Component {
 					railcar={ this.state.railcar }
 				/>
 				{ this.props.shouldShowPopularTopics( this.state.searchValue ) && (
-					<PopularTopics onSelect={ this.onSiteTopicSelect } />
+					<PopularTopics onSelect={ this.onSiteTopicChange } />
 				) }
 			</>
 		);
@@ -222,7 +219,8 @@ export default localize(
 	connect(
 		( state, ownProps ) => {
 			const verticals = getVerticals( state, ownProps.searchValue );
-			const isVerticalSearchPending = ownProps.searchValue && null == verticals;
+			const isVerticalSearchPending = get( state, 'signup.verticals.isFetching', false );
+
 			return {
 				verticals: verticals || [],
 				isVerticalSearchPending,
@@ -230,6 +228,7 @@ export default localize(
 			};
 		},
 		( dispatch, ownProps ) => ( {
+			bindDebounce: func => debounce( func, 1000 ),
 			shouldShowPopularTopics: searchValue => ! searchValue && ownProps.showPopular,
 		} )
 	)( SiteVerticalsSuggestionSearch )
